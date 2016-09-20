@@ -11,44 +11,60 @@
 
 
 /**
- * implementation of hook_block().
+ * Implements hook_block_info().
  */
-function cul_login_block($op = 'list', $delta = 0, $edit = array()) {
-  switch ($op) {
-    case 'list':
-      $blocks[0]['info'] = t('Cornell Library Login');
-      $blocks[0]['cache'] = BLOCK_CACHE_GLOBAL;
-      return $blocks;
-    case 'configure':
-      $form['cul_login_block_required_permit'] = array(
+function cul_login_block_info() {
+  $blocks['cul_login_info']['info'] = t('Cornell Library Login');
+  $blocks['cul_login_info']['cache'] = DRUPAL_CACHE_GLOBAL;
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_configure().
+ */
+function cul_login_block_configure($delta) {
+  $form['cul_login_block_required_permit'] = array(
 				'#type' => 'textfield',
 				'#title' => t('Required CUWebAuth permit (eg. library)'),
 				'#default_value' => variable_get('cul_login_block_required_permit', ''),
 				);
-      return $form;
-    case 'save':
-      variable_set('cul_login_block_required_permit', t("@permit", array('@permit' => $edit['cul_login_block_required_permit'])));
-      break;
-    case 'view':
-      switch ($delta) {
-        case '0':
-          $block['subject'] = t("CUL Login");
-          if (user_is_logged_in()) {
-            $block['content'] = t('you are logged in');
-          }
-          else {
-            $block['content'] = drupal_get_form('cul_login_form');
-          }
-          return $block;
-          break;
+  return $form;
+}
+
+/**
+ * Implements hook_block_save().
+ */
+function cul_login_block_save($delta, $edit) {
+  variable_set('cul_login_block_required_permit', t("@permit", array('@permit' => $edit['cul_login_block_required_permit'])));
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function cul_login_block_view($delta) {
+  switch ($delta) {
+    case 'cul_login_info':
+      $block['subject'] = t("CUL Login");
+      if (user_is_logged_in()) {
+        $block['content'] = t('you are logged in');
       }
+      else {
+        $block['content'] = drupal_get_form('cul_login_form');
+      }
+      return $block;
+      break;
   }
 }
 
 /**
+ * Implements hook_block().
+ */
+function cul_login_block_OLD($op = 'list', $delta = 0, $edit = array()) { }
+
+/**
  * Define the login form for the block
  */
-function cul_login_form() {
+function cul_login_form($form) {
   $form['submit'] = array(
 		'#type' => 'submit',
 		'#value' => t('CUL Login'),
@@ -59,7 +75,7 @@ function cul_login_form() {
 /**
  * Define the login form for cuwebauth login from page
  */
-function cul_login_cuwebauth_form() {
+function cul_login_cuwebauth_form($form) {
   $form['submit'] = array(
 		'#type' => 'submit',
 		'#value' => t('CUWebAuth Login'),
@@ -70,7 +86,7 @@ function cul_login_cuwebauth_form() {
 /**
  * Define the login form for drupal login from page
  */
-function cul_login_create_account_form() {
+function cul_login_create_account_form($form) {
   $form['submit'] = array(
 		'#type' => 'submit',
 		'#value' => t('Create User Account'),
@@ -115,7 +131,7 @@ function cul_login_form_submit($form, &$form_state) {
 }
 
 /**
- * Implementation of hook_menu()
+ * Implements hook_menu().
  * this adds a page called 'cul_login' to any site using this module
  */
 function cul_login_menu() {
@@ -262,7 +278,7 @@ function cul_login_hello() {
 			array(
 				'@username' => $username,
 				'!user' => l('Look at your user information', 'user'),
-				'!logout' => l('Log out', 'logout'),
+				'!logout' => l('Log out', 'user/logout'),
 				)
 			);
   }
@@ -325,7 +341,7 @@ function cul_login_page() {
     $output = t('You are already logged in.<ul><li>!user</li><li>!logout</li></ul>',
 			array(
 				'!user' => l('Look at your user information', 'user'),
-				'!logout' => l('Log out', 'logout'),
+				'!logout' => l('Log out', 'user/logout'),
 				)
 			);
   }
@@ -388,7 +404,7 @@ function cul_login_create_and_login_user($netid) {
 
   // Write session, update timestamp, run user 'login' hook
   $edit = array();
-  user_authenticate_finalize($edit);
+  user_login_finalize($edit);
 }
 
 /**
@@ -411,12 +427,18 @@ function cul_login_test_authentication() {
  */
 function cul_login_authenticate_user($destination = NULL) {
   if (function_exists('cu_authenticate')) {
+    $has_dest = ($destination == NULL) ? 'no dest ' : 'has dest '; //jgrtest
     if ($destination == NULL) {
       // put url of current page into destination
       $path = isset($_GET['q']) ? $_GET['q'] : '<front>';
       // note: this can not be an absolute path
-      $destination = url($path, array('absolute' => FALSE));
+      $destination = url($path, array('absolute' => FALSE, 'https' => TRUE)); //jgrtest
     }
+    else {
+      //$destination = url($destination, array('absolute' => FALSE, 'https' => TRUE)); //jgrtest
+    }
+    //drupal_set_message($has_dest . $destination);
+    //return FALSE;
     // find if a permit is required
     $required_permit = variable_get('cul_login_block_required_permit', 'library');
     // if this has to go off to CUWebAuth it won't return from this function
@@ -441,11 +463,8 @@ function cul_login_logout($destination = NULL, $delete_cuwa_cookies = FALSE) {
  * function to check if user name is a valid Drupal user
  */
 function cul_login_valid_user($username) {
-  $account = user_load(array('name' => $username, 'status' => 1));
-  if ($account === FALSE) {
-    return FALSE;
-  }
-  return TRUE;
+  $account = user_load_by_name($username);
+  return (($account !== FALSE) && ($account->status == 1));
 }
 
 
@@ -463,7 +482,7 @@ function cul_login_created_user($username) {
 // based on 'Pro Drupal Development' second edition by John K. VanDyk p. 130
 
 /**
- * Implementation of hook_form_alter().
+ * Implements hook_form_alter().
  */
 function cul_login_form_alter(&$form, $form_state, $form_id) {
   // if the user was orginally authorized by CUWebAuth
@@ -526,43 +545,48 @@ function cul_login_get_email_address($netid) {
 
 
 /**
- * Implementation of hook_user().
+ * Implements hook_user_insert().
  */
-function cul_login_user($op, &$edit, &$account, $category = NULL) {
-  switch ($op) {
-    case 'insert':
-      // New user was just added; if we did authentication,
-      // look up e-mail address of user in LDAP
-      // note: cul_login_created_user  won't work at this time
-      $the_user_name = $account->name;
-      if (cul_login_test_authentication() &&
+function cul_login_user_insert(&$edit, $account, $category) {
+  // New user was just added; if we did authentication,
+  // look up e-mail address of user in LDAP
+  // note: cul_login_created_user  won't work at this time
+  $the_user_name = $account->name;
+  if (cul_login_test_authentication() &&
 				($netid = cul_login_authenticate_user()) == $the_user_name) {
 
-        // get email address from LDAP
-        $email = cul_login_get_email_address($netid);
+    // get email address from LDAP
+    $email = cul_login_get_email_address($netid);
 
-        // Set e-mail address in the users table for this user.
-        $user_obj = user_load(array('name' => $netid));
-        if (($user_obj !== FALSE) && ($email !== FALSE)) {
-          $array = array();
-          $array['mail'] = $email;
-          $array['pass'] = sha1(rand(3, getrandmax())); // hard password so users will use CUWebAuth
-          $userObj = user_save($user_obj, $array);
-        }
-        else {
-          drupal_set_message(t("No user_obj or LDAP email."));
-        }
-      }
-      break;
-    case 'logout':
-      drupal_set_message(t('cul_login_user logout'));
-      cul_login_logout();
-      break;
+    // Set e-mail address in the users table for this user.
+    $user_obj = array_shift(user_load_multiple(array(), array('name' => $netid)));
+    if (($user_obj !== FALSE) && ($email !== FALSE)) {
+      $array = array();
+      $array['mail'] = $email;
+      $array['pass'] = sha1(rand(3, getrandmax())); // hard password so users will use CUWebAuth
+      $userObj = user_save($user_obj, $array);
+    }
+    else {
+      drupal_set_message(t("No user_obj or LDAP email."));
+    }
   }
 }
 
 /**
- * Implementation of hook_user_operations().
+ * Implements hook_user_logout().
+ */
+function cul_login_user_logout($account) {
+  drupal_set_message(t('cul_login_user logout'));
+  cul_login_logout();
+}
+
+/**
+ * Implements hook_user().
+ */
+function cul_login_user_OLD($op, &$edit, &$account, $category = NULL) { }
+
+/**
+ * Implements hook_user_operations().
  */
 function cul_login_user_operations() {
   return array(
@@ -581,6 +605,9 @@ function cul_login_claim_user($users, $view) {
   // see http://api.drupal.org/api/drupal/modules--user--user.module/function/user_external_login_register/6
   $module = 'culauth';
   foreach ($users as $uid) {
+    // TODO Convert "user_load" to "user_load_multiple" if "$uid" is other than a uid.
+    // To return a single user object, wrap "user_load_multiple" with "array_shift" or equivalent.
+    // Example: array_shift(user_load_multiple(array(), $uid))
     $auser = user_load($uid);
     $userinfo = array(
 			"authname_$module" => $auser->name,
