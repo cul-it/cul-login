@@ -2,5 +2,6 @@
 name = cul_login
 description = Cornell University Library create users and login to Drupal using CUWebAuth
 package = Cornell University Library
-core = 6.x
+core = 7.x
+; files[] = cul_login.test
 
