@@ -1,0 +1,756 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * SimpleTest tests to accompany the cul_login module
+ */
+
+/**
+ * Tests the SimpleTest Example module's content type.
+ */
+class CUL_LoginTestCase extends DrupalWebTestCase {
+
+/**
+* User with rights to post SimpleTest Example content.
+*/
+protected $privileged_user;
+protected $front_page_path;
+protected $front_page_body;
+protected $back_page_path;
+protected $back_page_body;
+protected $protected_page_path;
+protected $protected_page_body;
+protected $test_user;
+protected $test_user_password;
+protected $test_user_id;
+
+/**
+* getInfo() returns properties that are displayed in the test selection form.
+*/
+public static function getInfo() {
+	return array(
+		'name' => 'CUL Login',
+		'description' => 'Ensure that the CUL Login functions properly.',
+		'group' => 'Cornell',
+		);
+	}  
+
+/**
+* setUp() performs any pre-requisite tasks that need to happen. 
+*/
+public function setUp() {
+	// Enable any modules required for the test.
+	parent::setUp(
+		'cul_common',
+		'cul_login'
+		);
+		
+	$this->test_user = 'jgr25';
+	$this->test_user_password = 'kU_KZp-xhwcR4kW8'; // password for test CUWebAuth
+	$this->test_user_id = 9999;
+		
+	// make the user who can make the login block
+	$this->privileged_user = $this->drupalCreateUser(
+		array('access content', 'administer blocks', 'create page content',
+			'access administration pages', 'administer site configuration',
+			'administer users'
+			)
+		);
+	$this->drupalLogin($this->privileged_user);
+	
+	// move the cul_login block into left column
+	$edit = array(
+		'cul_login_0[region]' => 'left',
+		);
+	$this->drupalPost('admin/build/block', $edit, 'Save blocks');	
+	
+	// make a front page
+	$this->front_page_body = $this->randomName(42);
+	$settings = array(
+		'type' => 'page',
+		'body' => $this->front_page_body,
+		'promote' => 1,
+		);		
+	$node = $this->drupalCreateNode($settings);
+	$this->front_page_path = 'node/' . $node->nid;
+	
+	// make our front page THE front page
+	$path = 'admin/settings/site-information';
+	$edit = array(
+		'site_frontpage' => $this->front_page_path,
+		);
+	$this->drupalPost($path,$edit,'Save configuration');
+	
+	// make a back page
+	$this->back_page_body = $this->randomName(44);
+	$settings = array(
+		'type' => 'page',
+		'body' => $this->back_page_body,
+		'promote' => 0,
+		);		
+	$node = $this->drupalCreateNode($settings);
+	$this->back_page_path = 'node/' . $node->nid;
+	
+	$this->drupalLogout();
+	}
+	
+/**
+* Detect if we're running on Drupal.org's automated testbot.
+*
+* This is used inside the edit test so that the testbot skips intentionally
+* failing tests. Otherwise, it would mark this module as broken.
+*
+* For more information on the testbot, see http://qa.drupal.org/.
+*
+* @return boolean
+*   TRUE if running on testbot.
+*/
+public function runningOnTestbot() {
+	$testbot_code_directory = "../checkout";
+	return file_exists($testbot_code_directory);
+	}
+	
+/**
+ * findCurrentUserID - find the uid of the current user
+ */
+public function findCurrentUserID() {
+	$this->doAssertLoggedIn();
+	$page = "user";
+	$this->drupalGet($page);
+	$this->clickLink(t('Edit'));
+	$pattern = '|user/([0-9]+)/edit|';
+	$url = $this->getUrl();
+	$this->assertPattern($pattern, $url, t('There should be a user id in url of edit user page!'));
+	$arr = array();
+	preg_match_all($pattern, $url, $arr, PREG_PATTERN_ORDER);
+	return empty($arr[1][0]) ? FALSE : $arr[1][0];
+	}
+	
+/**
+ * doAssertLoggedIn - be sure user is logged in to Drupal
+ */
+public function doAssertLoggedIn() {
+	$page = "user";
+	$this->drupalGet($page);
+	$this->assertText(t('History'), t('Expecting to be logged in - History'));
+	$this->assertText(t('Member for'), t('Expecting to be logged in - Member for'));
+	}
+	
+/**
+ * doAssertNotLoggedIn - be sure user is Not logged in to Drupal
+ */
+public function doAssertNotLoggedIn() {
+	$page = "user";
+	$this->drupalGet($page);
+	$this->assertText(t('Username:'), t('Expecting to find - Username:'));
+	$this->assertText(t('Password:'), t('Expecting to find - Password:'));
+	$this->assertLink('Create new account', 0, t('Expecting to find Create new account.'));
+	}
+	
+/**
+ * expect to be at CUWebAuth page, fill it out and submit
+ */
+public function doCUWebAuth() {
+	// we should be at the CUWebAuth page
+	$this->assertLink(t('security@cornell.edu.'), 0, 
+		t('Expecting the link to security@cornell.edu.'));
+	//$this->assertFieldByName('netid', '', t('There should be a netid field'));
+	//$this->assertFieldByName('password', '', t('There should be a password field'));
+
+	// at the CUWebAuth page
+	$netid = $this->test_user;
+	$edit = array(
+		'netid' => $netid,
+		'password' => $this->test_user_password,
+		);
+	$this->drupalPost(NULL,$edit,'Login');
+	}
+
+/**
+ * get the cookies from CUWebAuth expecting the full CUWebAuth page
+ */
+public function doCUWebAuth_Full() {
+	$this->doAssertNotLoggedIn();
+	
+	$page = 'cul_login';
+	$this->drupalGet($page);
+	$edit = array();
+	$this->drupalPost($page, $edit, t('CUL Login'));
+
+	// login via cuwebauth
+	$edit = array();
+	$this->drupalPost($page, $edit, t('CUWebAuth Login'));
+	
+	// at the CUWebAuth page
+	$this->doCUWebAuth();
+
+	$this->doAssertNotLoggedIn();
+	}
+	
+/**
+ * get the cookies from CUWebAuth not expecting to see the CUWebAuth page
+ */
+public function doCUWebAuth_Quick() {
+	$this->doAssertNotLoggedIn();
+	
+	$page = 'cul_login';
+	$this->drupalGet($page);
+	
+	$this->assertText(t('Logged in @netid.',  array('@netid' => $this->test_user)));
+
+	$this->doAssertLoggedIn();
+	}
+
+/**
+ * create the Drupal Account
+ */
+public function doCreateDrupalAccount() {
+	$this->doAssertNotLoggedIn();
+
+	$page = 'cul_login';
+	$this->drupalGet($page);
+	$this->assertText(t('Welcome @netid! Now you can create an account on this site.',  
+		array('@netid' => $this->test_user)),
+		t('Welcome should show netid.'));
+	
+	// create new account
+	$edit = array();
+	$this->drupalPost($page, $edit, t('Create User Account'));	
+	
+	$this->assertText(t('New user @netid created.',  array('@netid' => $this->test_user)),
+		t('Should show New user created.'));
+
+	$this->doAssertLoggedIn();
+	
+	// capture the user ID
+	$this->test_user_id = $this->findCurrentUserID();
+	}
+	
+/**
+ * log the Drupal user out
+ */
+public function doDrupalLogout() {
+	$this->doAssertLoggedIn();
+	$this->drupalLogout();
+	$this->doAssertNotLoggedIn();
+	}
+	
+/**
+ * log the Drupal User in
+ */
+public function doDrupalLogin() {
+	$this->doAssertNotLoggedIn();
+
+	$page = 'cul_login';
+	$this->drupalGet($page);
+
+	$netid = $this->test_user;
+	$olduser = $this->test_user_id;
+	$existing_user = user_load(array('name' => $netid, 'pass' => $this->test_user_password));
+	if (!empty($existing_user) && !empty($existing_user->uid)) {
+		$this->test_user_id = $existing_user->uid;
+		$this->drupalLogin($existing_user);
+		}		
+
+	$this->assertNotEqual(9999, $this->test_user_id, t('userid should not be the default'));
+	$this->assertNotEqual(1, $this->test_user_id, t('userid should not be 1'));
+
+	$this->doAssertLoggedIn();
+	}
+	
+
+/**
+ * do the login procedure - tested in CUL_LoginTestPage
+ */
+public function doLoginCreateAccount() {
+	$page = 'cul_login';
+	$this->drupalGet($page);
+	$edit = array();
+	$this->drupalPost($page, $edit, t('CUL Login'));
+
+	// login via cuwebauth
+	$edit = array();
+	$this->drupalPost($page, $edit, t('CUWebAuth Login'));
+	
+	// at the CUWebAuth page
+	$netid = $this->test_user;
+	$edit = array(
+		'netid' => $netid,
+		'password' => $this->test_user_password,
+		);
+	$this->drupalPost(NULL,$edit,'Login');
+	
+	// create new account
+	$edit = array();
+	$this->drupalPost($page, $edit, t('Create User Account'));	
+	
+	$this->assertText(t('New user @netid created.',  array('@netid' => $netid)),
+		t('Should show New user created.'));
+		
+	// store the new user's user id
+	$this->test_user_id = $this->findCurrentUserID();
+	}
+	
+/**
+ * dump the current page for debugging
+ */
+public function doDump() {
+	$url = $this->getUrl();
+	$text = $this->drupalGetContent();
+	$text = strip_tags($text);
+	$this->fail(t('url: @url, page text: @text', array('@url' => $url, '@text' => $text)));
+	}
+	
+} //CUL_LoginTestCase
+
+/****** ALL TESTS MUST HAVE NAMES STARTING WITH 'test' *************/
+
+/**
+ * basic tests
+ */
+class CUL_LoginTestBasic extends CUL_LoginTestCase {
+
+/* inherits setUp() */
+
+/**
+* getInfo() returns properties that are displayed in the test selection form.
+*/
+public static function getInfo() {
+	return array(
+		'name' => 'CUL Login Basic',
+		'description' => 'Ensure that the basic testing setup functions properly.',
+		'group' => 'Cornell',
+		);
+	}  
+
+/**
+ * be sure front page has at least changed from default install
+ */
+function testFrontpageChanged() {
+    $this->drupalGet('');
+    $this->assertNoText(t('Welcome to your new Drupal website!'),
+      t('Default Drupal front page has been changed.'));
+  	}
+
+/**
+ * testSetup - be sure we have our pages set up
+ */
+public function testSetup() {
+	$page = '';
+	$this->drupalGet($page);
+	$this->assertText(t($this->front_page_body), t("Make sure we have our front page."));
+	$this->assertNoText(t($this->back_page_body), t("Make sure we can't see our back page on the front."));
+	
+	$page = $this->back_page_path;
+	$this->drupalGet($page);
+	$this->assertText(t($this->back_page_body), t("Make sure we have our back page."));
+	$this->assertNoText(t($this->front_page_body), t("Make sure we can't see our front page on the back page."));
+	}
+	
+
+/**
+ * testLoginPage - can we get to the login page
+ */
+public function testLoginPage() {
+	$page = 'cul_login';
+	$this->drupalGet($page);
+	$this->assertResponse(200, t('make sure login page @page exists', 
+		array('@page' => $page)));
+	$this->assertText(t('Cornell University Library Login'), t("Found login page"));
+	}
+
+/**
+ * testLoginBlock - be sure the login block is showing
+ */
+public function testLoginBlock() {
+	$page = '';
+	$this->drupalGet($page);
+	$this->assertText(t('CUL Login'), "Found login block");
+	}
+	
+} // CUL_LoginTestBasic
+
+
+/**
+ * detailed tests
+ */
+class CUL_LoginTestPage extends CUL_LoginTestCase {
+
+/* inherits setUp() */
+
+/**
+* getInfo() returns properties that are displayed in the test selection form.
+*/
+public static function getInfo() {
+	return array(
+		'name' => 'CUL Login Page',
+		'description' => 'Ensure that the Login Page functions properly.',
+		'group' => 'Cornell',
+		);
+	}  
+
+
+/**
+ * testLoginButtonOnPage - can we login from login page
+ */
+public function testLoginButtonOnPage() {
+	$page = 'cul_login';
+	$this->drupalGet($page);
+	$this->assertNoText(t('you are logged in'), t("block says not logged in"));
+	$this->assertNoText(t('already logged in'), t("page says not logged in"));
+	$edit = array();
+	$this->drupalPost($page, $edit, t('CUL Login'));
+	$this->assertText(t('need to login via CUWebAuth'), t("page should say need to CUWebAuth"));
+
+	// login via cuwebauth
+	$edit = array();
+	$this->drupalPost($page, $edit, t('CUWebAuth Login'));
+	$this->assertNoText(t('need to login via CUWebAuth'), t("should not be still at the login page"));
+	
+	// at the CUWebAuth page
+	$this->assertLink(t('security@cornell.edu.'), 0, 
+		t('Expecting the link to security@cornell.edu.'));
+	$this->assertFieldByName('netid', '', t('There should be a netid field'));
+	$this->assertFieldByName('password', '', t('There should be a password field'));
+	$netid = $this->test_user;
+	$edit = array(
+		'netid' => $netid,
+		'password' => $this->test_user_password,
+		);
+	$this->drupalPost(NULL,$edit,'Login');
+	
+	$page = 'cul_login';
+	$this->drupalGet($page);
+	$this->assertText(t('Welcome @netid! Now you can create an account on this site.',
+		array('@netid' => $netid)),t('Should get through CUWebAuth'));
+	$this->assertNoText(t('Configuration problem in cul_login_page'), t('Should not return directly from CUWebAuth'));
+	
+	// create new account
+	$edit = array();
+	$this->drupalPost($page, $edit, t('Create User Account'));
+	$this->assertText(t('New user @netid created.', array('@netid' => $netid)), t('Should show New user created'));
+	
+	// the block should say you are logged in
+	$this->assertText(t('you are logged in'), t('The block should report you are logged in'));
+	
+	$this->drupalLogout();
+	} 
+}
+
+/**
+ * detailed tests
+ */
+class CUL_LoginTestBlock extends CUL_LoginTestCase {
+
+/* inherits setUp() */
+
+/**
+* getInfo() returns properties that are displayed in the test selection form.
+*/
+public static function getInfo() {
+	return array(
+		'name' => 'CUL Login Block',
+		'description' => 'Ensure that the Login Block functions properly.',
+		'group' => 'Cornell',
+		);
+	}  
+
+/**
+ * testLoginButtonOnBlock - can we login from login block
+ */
+public function testLoginButtonOnBlock() {
+	$this->doLoginCreateAccount();
+	$this->drupalLogout();
+	
+	// should have account and cookies now
+	
+	// got to the back page
+	$page = $this->back_page_path;
+	$this->drupalGet($page);
+	$this->assertText($this->back_page_body, t('expecting to be at the back page'));
+	$this->assertNoText(t('you are logged in'), t("block says not logged in"));
+	
+	// click the login button
+	$edit = array();
+	$this->drupalPost($page, $edit, t('CUL Login'));
+	$this->assertText(t('you are logged in'), t("block should say logged in"));
+	$this->assertText($this->back_page_body, t('expecting to still be at the back page after login'));
+
+	$this->drupalLogout();	
+	}
+
+/**
+ * testLoginButtonOnBlockNoAccount - when there's no account button goes to login page
+ */
+public function testLoginButtonOnBlockNoAccount() {
+	// should not have an account at this time
+	
+	// go to the front page
+	$page = $this->front_page_path;
+	$this->drupalGet($page);
+	$this->assertText($this->front_page_body, t('expecting to be at the front page'));
+	$this->assertNoText(t('you are logged in'), t("block says not logged in"));
+	
+	// click the login button
+	$edit = array();
+	$this->drupalPost($page, $edit, t('CUL Login'));
+	
+	// we should be at the regular login page
+	$this->assertNoText(t('you are logged in'), t("block says not logged in"));
+	$this->assertText(t('need to login via CUWebAuth'), t("page should say need to CUWebAuth"));
+	
+	}
+
+/**
+ * testLoginButtonOnBlockCookiesOnly - when there's cookies 
+ * but no account, button goes to 'create account' on login page
+ */
+public function testLoginButtonOnBlockCookiesOnly() {
+	$this->doLoginCreateAccount();
+	$this->drupalLogout();
+	
+	// should have account and cookies now
+	// login as admin user
+	$this->drupalLogin($this->privileged_user);
+	$page = 'user/' . $this->test_user_id . '/edit';
+	$this->drupalGet($page);
+	$this->assertText($this->test_user, t('This should be @usr', array('@usr' => $this->test_user)));
+	$edit = array(
+		'mail' => 'foo@poo.com', // required field!
+		);
+	$this->drupalPost($page, $edit, t('Delete'));
+	$this->drupalPost(NULL, array(), t('Delete')); //confirmation page
+	$this->assertText(t('@usr has been deleted.', array('@usr' => $this->test_user)));
+	$this->drupalLogout();
+	
+	// go to the front page
+	$page = $this->front_page_path;
+	$this->drupalGet($page);
+	$this->assertText($this->front_page_body, t('expecting to be at the front page'));
+	$this->assertNoText(t('you are logged in'), t("block says not logged in"));
+	
+	// click the login button
+	$edit = array();
+	$this->drupalPost($page, $edit, t('CUL Login'));
+	
+	// we should be at the regular login page
+	$this->assertNoText(t('you are logged in'), t("block says not logged in"));
+	$this->assertNoText(t('need to login via CUWebAuth'), t("page should not say need to CUWebAuth"));
+	$this->assertText(t('Welcome @netid! Now you can create an account on this site.',
+		array('@netid' => $this->test_user)),t('Should skip CUWebAuth'));
+	
+	}
+	
+} //CUL_LoginTestBlock
+
+/**
+ * detailed tests
+ */
+class CUL_LoginTestPermits extends CUL_LoginTestCase {
+
+/* inherits setUp() */
+
+/**
+* getInfo() returns properties that are displayed in the test selection form.
+*/
+public static function getInfo() {
+	return array(
+		'name' => 'CUL Login Permits',
+		'description' => 'Ensure that the cul_login_permit functions properly.',
+		'group' => 'Cornell',
+		);
+	}  
+
+/**
+ * testPermits - unit test for detecting required permits
+ */
+public function testPermits() {
+	
+	$result = cul_login_permit('jgr25', 'library');
+	$message = t('TRUE should be returned on valid permit.');
+	$this->assertTrue($result, $message);
+	
+	$result = cul_login_permit('jgr25', '');
+	$message = t('FALSE should be returned on NULL permit.');
+	$this->assertFalse($result, $message);
+	
+	$result = cul_login_permit('jgr25');
+	$message = t('FALSE should be returned on NULL permit due to missing argument.');
+	$this->assertFalse($result, $message);
+	
+	$result = cul_login_permit('jgr25', 'cu.student');
+	$message = t('FALSE should be returned on invalid permit.');
+	$this->assertFalse($result, $message);
+	
+	$result = cul_login_permit('jgr25abc', 'library');
+	$message = t('FALSE should be returned on invalid netid.');
+	$this->assertFalse($result, $message);
+	
+	$result = cul_login_permit('');
+	$message = t('FALSE should be returned on NULL netid.');
+	$this->assertFalse($result, $message);
+	}
+
+
+} // CUL_LoginTestPermits
+
+
+/**
+ * test login stages
+ */
+class CUL_LoginTestStages extends CUL_LoginTestCase {
+
+/* inherits setUp() */
+
+/**
+* getInfo() returns properties that are displayed in the test selection form.
+*/
+public static function getInfo() {
+	return array(
+		'name' => 'CUL Login Stages Test',
+		'description' => 'Ensure that the cul_login functions properly in stages.',
+		'group' => 'Cornell',
+		);
+	}  
+	
+/**
+ * testLoginSequence - run through the steps
+ */
+public function testLoginSequence() {
+	$this->doCUWebAuth_Full();
+	$this->doCreateDrupalAccount();
+	$this->doDrupalLogout();
+	$this->doDrupalLogin();
+	$this->doDrupalLogout();
+	$this->doCUWebAuth_Quick();
+	}
+
+}	// CUL_LoginTestStages
+
+/**
+ * test login pre-existing accounts
+ */
+class CUL_LoginTestPreAccount extends CUL_LoginTestCase {
+
+/* inherits setUp() */
+
+/**
+* getInfo() returns properties that are displayed in the test selection form.
+*/
+public static function getInfo() {
+	return array(
+		'name' => 'CUL Login with pre-existing account',
+		'description' => 'Ensure that the cul_login does not overrite preexisting account with netid.',
+		'group' => 'Cornell',
+		);
+	}  
+	
+/**
+ * testLoginSequence - run through the steps
+ */
+public function testLoginPreAccount() {
+	// make a new user account
+	$path = 'user/register';
+	$edit = array('name' => $this->test_user, 'mail' => 'jgr25@cornell.edu');
+	$this->drupalPost($path, $edit, t('Create new account'));
+	
+	$this->doCUWebAuth_Full();
+	
+	$path = "cul_login";
+	$this->drupalGet($path);
+	$this->assertText(t('A user with this netID already exists. You may not create another account with this user name.'));
+	$this->doAssertNotLoggedIn();
+	}
+
+}	// CUL_LoginTestPreAccount
+
+
+/**
+ * test try to use normal login
+ */
+class CUL_LoginTestNormal extends CUL_LoginTestCase {
+
+/* inherits setUp() */
+
+/**
+* getInfo() returns properties that are displayed in the test selection form.
+*/
+public static function getInfo() {
+	return array(
+		'name' => 'CUL Login skip CUWebAuth with normal login',
+		'description' => 'Ensure that the cul_login does not let you login without CUWebAuth.',
+		'group' => 'Cornell',
+		);
+	}  
+	
+/**
+ * testLoginCookieDrop - unit test for delete CUWebAuth cookies
+ */
+public function testLoginCookieDrop() {
+	$this->doCUWebAuth_Full();
+	$this->doCreateDrupalAccount();
+	$include_cuwa_cookies = TRUE;
+	cuwebauth_logout(NULL, $include_cuwa_cookies); // whatever cuwebauth stores
+	$this->doDrupalLogout(); // netid and verify
+	
+	// should not have any cookies at this point
+	$page = 'cul_login';
+	$this->drupalGet($page);
+	$this->assertText(t('need to login via CUWebAuth'), t('Expecting to have no cookies after cuwebauth_logout.'));		
+	}
+	
+/**
+ * testLoginNormal - try to use normal login avoiding cuwebauth
+ */
+public function testLoginNormal() {
+	$this->doCUWebAuth_Full();
+	$this->doCreateDrupalAccount();
+	$this->doDrupalLogout();
+	
+	// first, be sure cul_login changed the password
+	$path = 'user';
+	$edit = array(
+		'name' => $this->test_user,
+		'pass' => $this->test_user_password,
+		);
+	$this->drupalPost($path, $edit, t('Log in'));
+	$this->assertText(t('Sorry, unrecognized username or password.'));
+	
+	// now change to a known password
+	$this->doDrupalLogin();
+	$userid = $this->findCurrentUserID();
+	$path = "user/" . $userid . "/edit";
+	$edit = array(
+		'mail' => 'jreidy@cornell.edu',
+		'pass[pass1]' => $this->test_user_password,
+		'pass[pass2]' => $this->test_user_password,
+		);
+	$this->drupalPost($path, $edit, t('Save'));
+	$this->assertText(t('The changes have been saved.'));
+
+	// should not be able to log in with the new password
+	$this->doDrupalLogout();
+	
+	// need to get rid of CUWebAuth cookies here or else login will pass cul_login_regular_login_validate
+	cuwebauth_logout($this->front_page_path);
+	
+	$page = $this->front_page_path;
+	$this->drupalGet($page);
+	
+	$path = 'user';
+	$edit = array(
+		'name' => $this->test_user,
+		'pass' => $this->test_user_password,
+		);
+	$this->drupalPost($path, $edit, t('Log in'));
+	$this->assertNoText(t('logged in'),t('Not expecting to be logged in now.'));
+	$this->assertNoText(t('@user', array('@user' => $this->test_user)),t('Not expecting to see user name.'));
+	
+	// this should lead to CUWebAuth
+	$this->doCUWebAuth();
+	
+	$this->doAssertNotLoggedIn();
+	}
+
+}	// CUL_LoginTestPreAccount

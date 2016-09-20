@@ -1,0 +1,590 @@
+<?php
+// $Id$
+/**
+ * @file
+ * Create Drupal users and let them login via CUWebAuth
+ *
+ *	adds a page '/cul_login'
+ *  adds a block 'Cornell Library Login'
+ *		configuring the block lets you add/remove a required permit name
+ */
+
+
+/**
+ * implementation of hook_block().
+ */
+function cul_login_block($op = 'list', $delta = 0, $edit = array()) {
+  switch ($op) {
+    case 'list':
+      $blocks[0]['info'] = t('Cornell Library Login');
+      $blocks[0]['cache'] = BLOCK_CACHE_GLOBAL;
+      return $blocks;
+    case 'configure':
+      $form['cul_login_block_required_permit'] = array(
+				'#type' => 'textfield',
+				'#title' => t('Required CUWebAuth permit (eg. library)'),
+				'#default_value' => variable_get('cul_login_block_required_permit', ''),
+				);
+      return $form;
+    case 'save':
+      variable_set('cul_login_block_required_permit', t("@permit", array('@permit' => $edit['cul_login_block_required_permit'])));
+      break;
+    case 'view':
+      switch ($delta) {
+        case '0':
+          $block['subject'] = t("CUL Login");
+          if (user_is_logged_in()) {
+            $block['content'] = t('you are logged in');
+          }
+          else {
+            $block['content'] = drupal_get_form('cul_login_form');
+          }
+          return $block;
+          break;
+      }
+  }
+}
+
+/**
+ * Define the login form for the block
+ */
+function cul_login_form() {
+  $form['submit'] = array(
+		'#type' => 'submit',
+		'#value' => t('CUL Login'),
+		);
+  return $form;
+}
+
+/**
+ * Define the login form for cuwebauth login from page
+ */
+function cul_login_cuwebauth_form() {
+  $form['submit'] = array(
+		'#type' => 'submit',
+		'#value' => t('CUWebAuth Login'),
+		);
+  return $form;
+}
+
+/**
+ * Define the login form for drupal login from page
+ */
+function cul_login_create_account_form() {
+  $form['submit'] = array(
+		'#type' => 'submit',
+		'#value' => t('Create User Account'),
+		);
+  return $form;
+}
+
+/**
+ * Validate the form
+ */
+function cul_login_form_validate($form, &$form_state) {
+  if (cul_login_test_authentication()) {
+    // user is already authorized
+    // we can get the netid without going back to CUWebAuth so this will return
+    $netid = cul_login_authenticate_user();
+    if (cul_login_valid_user($netid)) {
+      // this is a Drupal user - is it one cul_login created?
+      if (cul_login_created_user($netid)) {
+        // this is a user cul_login created
+        $form_state['cul_login']['valid_netid'] = $netid;
+        return;
+      }
+    }
+  }
+  $form_state['cul_login']['redirect'] = 'cul_login'; // handle complexities
+  //form_set_error('submit', t('Please use the regular cul_login page.'));
+}
+
+/**
+ * Handle post-validation form submission
+ */
+function cul_login_form_submit($form, &$form_state) {
+  if (isset($form_state['cul_login']['valid_netid'])) {
+    $netid = $form_state['cul_login']['valid_netid'];
+    cul_login_create_and_login_user($netid);
+    drupal_set_message(t('Logged in as %name', array('%name' => $netid)));
+  }
+  else if (isset($form_state['cul_login']['redirect'])) {
+    // just go to the login page to handle all the issues
+    $form_state['redirect'] = $form_state['cul_login']['redirect'];
+  }
+}
+
+/**
+ * Implementation of hook_menu()
+ * this adds a page called 'cul_login' to any site using this module
+ */
+function cul_login_menu() {
+  $items = array();
+
+  /* old version
+   $items['cul_login_old'] = array(
+   'title' => 'Cornell University Library Login',
+   'description' => 'Login with CUWebAuth',
+   'page callback' => 'cul_login_page',
+   //'access callback' => TRUE,
+   'access arguments' => array('access content'),
+   'type' => MENU_CALLBACK,
+   );
+   */
+
+  $items['cul_login_pin'] = array(
+		'title' => 'Cornell University Library Mobile Login',
+		'description' => 'Login with CUWebAuth and pin',
+		'page callback' => 'cul_login_pin_page',
+		//'access callback' => TRUE,
+		'access arguments' => array('access content'),
+		'type' => MENU_CALLBACK,
+		);
+
+  $items['cul_login'] = array(
+		'title' => 'Cornell University Library Login',
+		'description' => 'Login with CUWebAuth',
+		'page callback' => 'cul_login_page2',
+		//'access callback' => TRUE,
+		'access arguments' => array('access content'),
+		'type' => MENU_CALLBACK,
+		);
+  $items['cul_login/cuwebauth'] = array(
+		'title' => 'Cornell University Library Login - CUWebAuth',
+		'description' => 'CUWebAuth',
+		'page callback' => 'cul_login_cuwebauth',
+		//'access callback' => TRUE,
+		'access arguments' => array('access content'),
+		'type' => MENU_CALLBACK,
+		);
+  $items['cul_login/account'] = array(
+		'title' => 'Cornell University Library Login - Account',
+		'description' => 'Account Check',
+		'page callback' => 'cul_login_account',
+		//'access callback' => TRUE,
+		'access arguments' => array('access content'),
+		'type' => MENU_CALLBACK,
+		);
+  $items['cul_login/hello'] = array(
+		'title' => 'Cornell University Library Login - User',
+		'description' => 'User Information',
+		'page callback' => 'cul_login_hello',
+		//'access callback' => TRUE,
+		'access arguments' => array('access content'),
+		'type' => MENU_CALLBACK,
+		);
+
+  return $items;
+}
+
+/**
+ * callback function for login page
+ */
+function cul_login_page2() {
+  if (cul_login_test_authentication()) {
+    $path = "cul_login/account";
+  }
+  else {
+    $path = "cul_login/cuwebauth";
+  }
+  drupal_goto($path);
+}
+
+/**
+ * callback function for cul_login/cuwebauth
+ */
+function cul_login_cuwebauth() {
+  if (cul_login_test_authentication()) {
+    // if the user is already authenticated cul_login_authenticate_user
+    // will return - just skip bogus error message
+    drupal_goto("cul_login/account"); // no leading slash
+  }
+  $path = "/cul_login/account"; // destination requires leading slash
+  $netid = cul_login_authenticate_user($path);
+  // note: if this actually returns there is a problem
+  $output = t('Unable to authenticate with CUWebAuth.');
+  return ($output);
+}
+
+/**
+ * callback function for cul_login/account
+ */
+function cul_login_account() {
+  // user should be cuwebautherized by now
+  if (!cul_login_test_authentication()) {
+    $output = t('Please log in via cul_login!');
+  }
+  else {
+    $netid = cul_login_authenticate_user();
+    $path = "cul_login/hello"; // where to go after successful login
+    if (cul_login_valid_user($netid)) {
+      // this is a Drupal user - is it one cul_login created?
+      if (cul_login_created_user($netid)) {
+        // this is a user cul_login created
+        cul_login_create_and_login_user($netid);
+        drupal_goto($path);
+      }
+      else {
+        $output = t('A user with this netID already exists. You may not create another account with this user name.');
+      }
+    }
+    else {
+      // no user with this name - create a new one
+      $email = cul_login_get_email_address($netid);
+      if ($email === FALSE) {
+        // oops - no email, sorry pal
+        $output = t('Unable to locate an email address for @netid.',
+					array('@netid' => $netid));
+      }
+      else {
+        drupal_set_message(t('Creating a new account for CUL user @netid.', array('@netid' => $netid)));
+        cul_login_create_and_login_user($netid);
+        drupal_goto($path);
+      }
+    }
+  }
+  return $output;
+}
+
+/**
+ * callback function for cul_login/hello
+ */
+function cul_login_hello() {
+  // user should be cuwebautherized & logged in by now
+  if (!cul_login_test_authentication() || !user_is_logged_in()) {
+    $output = t('Please log in via cul_login!');
+  }
+  else {
+    // show some user info
+    global $user;
+    $username = $user->name;
+    $output = t('You are logged in as @username.<ul><li>!user</li><li>!logout</li></ul>',
+			array(
+				'@username' => $username,
+				'!user' => l('Look at your user information', 'user'),
+				'!logout' => l('Log out', 'logout'),
+				)
+			);
+  }
+
+  return $output;
+}
+
+/**
+ * callback function for login with pin page
+ */
+function cul_login_pin_page() {
+  global $user;
+  $output = cul_login_page2();
+  if (user_is_logged_in()) {
+    $userid = $user->uid;
+    $path = "user/$userid/edit/Mobile";
+    drupal_goto($path);
+  }
+  return $output;
+}
+
+/**
+ * callback function for login page - obsolete version!!!
+ */
+function cul_login_page() {
+
+  // if user has already submitted
+  if (isset($_POST['op'])) {
+    if ($_POST['op'] == 'CUWebAuth Login') {
+      // note: when CUWebAuth returns this will also be true
+      if (!cul_login_test_authentication()) {
+        // Send the user off to CUWebAuth - should not return to the code below
+        $netid = cul_login_authenticate_user();
+        watchdog('cul_login', t("unexpected return from cul_login_authenticate_user"));
+        $output = t("Configuration problem in cul_login_page.");
+        return $output;
+      }
+    }
+    else if ($_POST['op'] == 'CUL Login') {
+      // in this case someone hit the submit button in the block,
+      // but the block decided the page should handle the login
+    }
+    else if ($_POST['op'] == 'Create User Account') {
+      // new user
+      $netid = cul_login_authenticate_user();
+      if ($netid === FALSE) {
+        $output = t('Unable to authorize.');
+      }
+      else {
+        cul_login_create_and_login_user($netid);
+        $output = t('New user @user created.', array('@user' => $netid));
+      }
+      return $output;
+    }
+  }
+
+  $output = t('error in cul_login_page');
+  // if the user is logged in just go to the user page
+  if (user_is_logged_in()) {
+    $output = t('You are already logged in.<ul><li>!user</li><li>!logout</li></ul>',
+			array(
+				'!user' => l('Look at your user information', 'user'),
+				'!logout' => l('Log out', 'logout'),
+				)
+			);
+  }
+  else {
+    if (!cul_login_test_authentication()) {
+      $output = t("First you'll need to login via CUWebAuth.");
+      $output .= drupal_get_form('cul_login_cuwebauth_form');
+      /*
+       We know the user will need to go off to CUWebAuth,
+       so this call never returns to the code below it!
+       */
+      //$netid = cul_login_authenticate_user();
+      //watchdog('cul_login',t("unexpected return from cul_login_authenticate_user"));
+      //$output = t("Configuration problem in cul_login_page.");
+    }
+    else {
+      // we can get the netid without going back to CUWebAuth so this will return
+      $netid = cul_login_authenticate_user();
+      if ($netid === FALSE) {
+        $output = t('Unable to authorize.');
+      }
+      else {
+        if (cul_login_valid_user($netid)) {
+          // this is a Drupal user - is it one cul_login created?
+          if (cul_login_created_user($netid)) {
+            // this is a user cul_login created
+            cul_login_create_and_login_user($netid);
+            $output = t('Logged in @user.', array('@user' => $netid));
+          }
+          else {
+            $output = t('A user with this netID already exists. You may not create another account with this user name.');
+          }
+        }
+        else {
+          // no user with this name - create a new one
+          $email = cul_login_get_email_address($netid);
+          if ($email === FALSE) {
+            // oops - no email, sorry pal
+            $output = t('Unable to locate an email address for @netid.',
+							array('@netid' => $netid));
+          }
+          else {
+            $output = t('Welcome @netid! Now you can create an account on this site.',
+							array('@netid' => $netid));
+            $output .= drupal_get_form('cul_login_create_account_form');
+          }
+        }
+      }
+    }
+  }
+  return $output;
+}
+
+/**
+ * create a new user if necessary but log them in
+ */
+function cul_login_create_and_login_user($netid) {
+  // Log user in, or register new user if not already present
+  user_external_login_register($netid, 'culauth');
+
+  // Write session, update timestamp, run user 'login' hook
+  $edit = array();
+  user_authenticate_finalize($edit);
+}
+
+/**
+ * see if user is already authenticated
+ */
+function cul_login_test_authentication() {
+  $result = FALSE;
+  if (function_exists('verify_netid')) {
+    // this will never go off to CUWebAuth never to return like cu_authenticate can!
+    $result = verify_netid();
+  }
+  else {
+    drupal_set_message(t('Unable to verify netid.'));
+  }
+  return $result;
+}
+
+/**
+ * login via CUWebAuth and return netid or FALSE
+ */
+function cul_login_authenticate_user($destination = NULL) {
+  if (function_exists('cu_authenticate')) {
+    if ($destination == NULL) {
+      // put url of current page into destination
+      $path = isset($_GET['q']) ? $_GET['q'] : '<front>';
+      // note: this can not be an absolute path
+      $destination = url($path, array('absolute' => FALSE));
+    }
+    // find if a permit is required
+    $required_permit = variable_get('cul_login_block_required_permit', 'library');
+    // if this has to go off to CUWebAuth it won't return from this function
+    $netid = cu_authenticate($destination, $required_permit);
+    return $netid;
+  }
+  return FALSE;
+}
+
+/**
+ * logout via CUWebAuth
+ */
+function cul_login_logout($destination = NULL, $delete_cuwa_cookies = FALSE) {
+  if (function_exists('cuwebauth_logout')) {
+    cuwebauth_logout($destination, $delete_cuwa_cookies);
+    return TRUE;
+  }
+  return FALSE;
+}
+
+/**
+ * function to check if user name is a valid Drupal user
+ */
+function cul_login_valid_user($username) {
+  $account = user_load(array('name' => $username, 'status' => 1));
+  if ($account === FALSE) {
+    return FALSE;
+  }
+  return TRUE;
+}
+
+
+/**
+ * function to check if this user was created by cul_login
+ */
+function cul_login_created_user($username) {
+  $authmaps = user_get_authmaps($username);
+  if (isset($authmaps['culauth']) && $authmaps['culauth'] == $username) {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+// based on 'Pro Drupal Development' second edition by John K. VanDyk p. 130
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function cul_login_form_alter(&$form, $form_state, $form_id) {
+  // if the user was orginally authorized by CUWebAuth
+  // make sure they still are authorized, even if they are logging in
+  // through the regular Drupal methods.
+  if ($form_id == 'user_login' || $form_id == 'user_login_block') {
+    if (isset($form_state['post']['name'])) {
+      // posting the form - add our validation function
+
+      // watch out - user_login_authenticate_validate logs user in and skips subsequent validations
+      $array_key = array_search('user_login_authenticate_validate', $form['#validate']);
+      if ($array_key === FALSE) {
+        // Could not find it, some other module must have run form_alter().
+        // We simply add our validation just before the final validator.
+        $final_validator = array_pop($form['#validate']);
+        $form['#validate'][] = 'cul_login_regular_login_validate';
+        $form['#validate'][] = $final_validator;
+      }
+      else {
+        // insert just before user_login_authenticate_validate
+        array_splice($form['#validate'], $array_key, 0, 'cul_login_regular_login_validate');
+      }
+
+      $msg = print_r($form['#validate'], true);
+    }
+  }
+}
+
+/**
+ * Form validation handler.
+ */
+function cul_login_regular_login_validate($form, &$form_state) {
+  // This should be used in conjunction with the Public Registrations option
+  // 		Only site administrators can create new user accounts.
+  // on /admin/user/settings. We want to make sure a user has a fresh CUWebAuth
+  // authorization. If they aren't able to get that we don't want them messing with
+  // the Drupal site either.
+  // Accounts set up via the cul_login form do not need admin intervention, but they only
+  // have the 'Authenticated User' role initially.
+  // Also be sure users can't change their user names away from netid so cul_login_is_cuwebauthorized works!
+  $the_user_name = isset($form_state['values']['name']) ? $form_state['values']['name'] : '';
+  if (cul_login_created_user($the_user_name)) {
+    // this user account was originally created and authorized by culauth
+    // be sure the dude still has CUWebAuth
+    if (!cul_login_authenticate_user()) {
+      form_set_error('name', t('Please use the CUL Login for CUWebAuth authorization.'));
+    }
+  }
+}
+
+/**
+ * cul_login_get_email_address - get email address for a netid
+ */
+function cul_login_get_email_address($netid) {
+  // get email address from LDAP
+  $fields = 'Mail';
+  $vals = get_ldap_data($fields, $netid);
+  return isset($vals['mail']) ? $vals['mail'] : FALSE;
+}
+
+
+/**
+ * Implementation of hook_user().
+ */
+function cul_login_user($op, &$edit, &$account, $category = NULL) {
+  switch ($op) {
+    case 'insert':
+      // New user was just added; if we did authentication,
+      // look up e-mail address of user in LDAP
+      // note: cul_login_created_user  won't work at this time
+      $the_user_name = $account->name;
+      if (cul_login_test_authentication() &&
+				($netid = cul_login_authenticate_user()) == $the_user_name) {
+
+        // get email address from LDAP
+        $email = cul_login_get_email_address($netid);
+
+        // Set e-mail address in the users table for this user.
+        $user_obj = user_load(array('name' => $netid));
+        if (($user_obj !== FALSE) && ($email !== FALSE)) {
+          $array = array();
+          $array['mail'] = $email;
+          $array['pass'] = sha1(rand(3, getrandmax())); // hard password so users will use CUWebAuth
+          $userObj = user_save($user_obj, $array);
+        }
+        else {
+          drupal_set_message(t("No user_obj or LDAP email."));
+        }
+      }
+      break;
+    case 'logout':
+      drupal_set_message(t('cul_login_user logout'));
+      cul_login_logout();
+      break;
+  }
+}
+
+/**
+ * Implementation of hook_user_operations().
+ */
+function cul_login_user_operations() {
+  return array(
+    'export' => array(
+      'label' => t('Let user authenticate with CUWebAuth'),
+      'callback' => 'cul_login_claim_user',
+    ),
+  );
+}
+
+/**
+ * Mark the user for CUWebAuth authentication
+ * @param array $accounts
+ */
+function cul_login_claim_user($users, $view) {
+  // see http://api.drupal.org/api/drupal/modules--user--user.module/function/user_external_login_register/6
+  $module = 'culauth';
+  foreach ($users as $uid) {
+    $auser = user_load($uid);
+    $userinfo = array(
+			"authname_$module" => $auser->name,
+			);
+    $account = user_save($auser, $userinfo);
+  }
+}
