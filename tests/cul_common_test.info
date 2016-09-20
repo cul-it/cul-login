@@ -1,0 +1,8 @@
+; $Id$
+name = "cul_common_test"
+description = "Simulate the functions of cul_common used by cul_login."
+package = Testing
+version = VERSION
+core = 6.x
+files[] = cul_common_test.module
+hidden = TRUE

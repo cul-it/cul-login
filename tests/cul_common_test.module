@@ -1,0 +1,76 @@
+<?php
+/**
+ * cul_common_test.module - fake versions of modules provided by cul_common for testing cul_login
+ *	cu_authenticate
+ *	cuwebauth_logout
+ *	verify_netid
+ */
+
+
+function verify_netid() {
+	return isset($_COOKIE['fake_CUWebAuth_netid']) || isset($_COOKIE['fake_netid']);
+}
+
+/**
+ * Basic authentication method, redirects to a CUWebAuth protected directory,
+ * and upon successful authentication, it will set a 'netid' cookie.
+ */
+function cu_authenticate($destination='') {
+	// simulate $netID = getenv('REMOTE_USER');
+	if (isset($_COOKIE['fake_CUWebAuth_netid'])) {
+		return $_COOKIE['fake_CUWebAuth_netid'];
+		}
+	else if (verify_netid()) {
+		return $_COOKIE['fake_netid'];
+		}
+	else {
+		if (empty($destination)) {
+			$destination = request_uri();
+			}
+		$destination = urlencode(str_replace('/?q=','',$destination));
+		unset($_REQUEST['destination']);
+		$path = '/' . drupal_get_path('module','cul_login') . '/tests/CULogin.php';
+		$url = 'http://' . $_SERVER['HTTP_HOST'];
+		$url .= $path . "?destination=" . $destination;
+		//drupal_goto($path, 'destination=' . $destination);
+		
+		header("Location: $url");
+		exit();
+		}
+	}
+
+/**
+ * Simulate a logout.
+ */
+function cuwebauth_logout($logout_url=NULL, $include_cuwa_cookies=FALSE) {
+	unset($_COOKIE['netid']);
+	unset($_COOKIE['verify_netid']);
+	setcookie('fake_netid', '', time() - 3600);
+	setcookie('verify_netid', '', time() - 3600);
+	if ($include_cuwa_cookies) {
+		unset($_COOKIE['fake_CUWebAuth_netid']);
+		setcookie('fake_CUWebAuth_netid', '', time() - 3600);
+		}
+  if ($logout_url) {
+    drupal_goto($logout_url);
+  }
+}
+
+/**
+ * Simulate logout from CUWebAuth
+ */
+function cuwebauth_logout_cuwebauth($logout_url=NULL) {
+	setcookie('fake_CUWebAuth_netid', FALSE, 0, '/');
+  if ($logout_url) {
+    drupal_goto($logout_url);
+  }
+}
+
+/**
+ * Simulate LDAP
+ */
+function get_ldap_data($return_fields=NULL, $netid=NULL) {
+	$output = array();
+	$output['mail'] = 'duck@honkingduck.com';
+	return $output;
+	}
