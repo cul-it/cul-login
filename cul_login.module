@@ -619,3 +619,22 @@ function cul_login_claim_user($users, $view) {
     $account = user_save($auser, $userinfo);
   }
 }
+
+/**
+ * Mark the user for SimpleSAML authentication
+ * @param array $accounts
+ */
+function cul_login_claim_user_saml($users, $view) {
+  // see http://api.drupal.org/api/drupal/modules--user--user.module/function/user_external_login_register/6
+  $module = 'simplesamlphp_auth';
+  foreach ($users as $uid) {
+    // TODO Convert "user_load" to "user_load_multiple" if "$uid" is other than a uid.
+    // To return a single user object, wrap "user_load_multiple" with "array_shift" or equivalent.
+    // Example: array_shift(user_load_multiple(array(), $uid))
+    $auser = user_load($uid);
+    $userinfo = array(
+      "authname_$module" => $auser->name,
+      );
+    $account = user_save($auser, $userinfo);
+  }
+}
