@@ -590,13 +590,13 @@ function cul_login_user_OLD($op, &$edit, &$account, $category = NULL) { }
  */
 function cul_login_user_operations() {
   return array(
-    'export' => array(
-      'label' => t('Let user authenticate with CUWebAuth'),
-      'callback' => 'cul_login_claim_user',
-    ),
     'export_saml' => array(
       'label' => t('Let user authenticate with SimpleSAML'),
       'callback' => 'cul_login_claim_user_saml',
+    ),
+    'export' => array(
+      'label' => t('Let user authenticate with CUWebAuth'),
+      'callback' => 'cul_login_claim_user',
     ),
   );
 }
